@@ -7,110 +7,99 @@ const INTERVAL = Number(process.env.CHECK_INTERVAL_MS || 60000);
 
 let lastSeen = new Set();
 
-if (!WEBHOOK) {
-  console.error("Missing DISCORD_WEBHOOK_URL");
-  process.exit(1);
-}
-
-if (!URL) {
-  console.error("Missing TARGET_URL");
+if (!WEBHOOK || !URL) {
+  console.error("Missing env variables");
   process.exit(1);
 }
 
 function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+  return new Promise((r) => setTimeout(r, ms));
 }
 
 async function fetchPage() {
-  console.log(`[${new Date().toISOString()}] Fetching page: ${URL}`);
+  console.log(`[${new Date().toISOString()}] Fetching page...`);
 
   const res = await fetch(URL, {
     headers: {
-      "User-Agent": "Mozilla/5.0"
-    }
+      "User-Agent":
+        "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15",
+      "Accept":
+        "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+      "Accept-Language": "en-US,en;q=0.9",
+    },
   });
 
-  console.log(`[${new Date().toISOString()}] Response status: ${res.status}`);
+  console.log(`Status: ${res.status}`);
 
-  const text = await res.text();
-  console.log(`[${new Date().toISOString()}] HTML length: ${text.length}`);
+  const html = await res.text();
+  console.log(`HTML length: ${html.length}`);
 
-  return text;
+  return html;
 }
 
+// 🔥 FIXED extractor (works with Pokémon site)
 function extractProducts(html) {
-  const matches = [...html.matchAll(/href="(\/product\/[^"]+)"/g)];
-  const products = new Set(matches.map((m) => "https://www.pokemoncenter.com" + m[1]));
+  const matches = [...html.matchAll(/"url":"(\/product\/[^"]+)"/g)];
 
-  console.log(
-    `[${new Date().toISOString()}] Extracted ${products.size} product links`
+  const products = new Set(
+    matches.map((m) =>
+      "https://www.pokemoncenter.com" + m[1].replace(/\\\//g, "/")
+    )
   );
+
+  console.log(`Extracted ${products.size} product links`);
 
   return products;
 }
 
 async function sendDiscord(message) {
-  console.log(`[${new Date().toISOString()}] Sending Discord message...`);
-
-  const response = await fetch(WEBHOOK, {
+  await fetch(WEBHOOK, {
     method: "POST",
     headers: {
-      "Content-Type": "application/json"
+      "Content-Type": "application/json",
     },
-    body: JSON.stringify({ content: message })
+    body: JSON.stringify({
+      content: message,
+    }),
   });
 
-  console.log(
-    `[${new Date().toISOString()}] Discord response status: ${response.status}`
-  );
-
-  if (!response.ok) {
-    const body = await response.text();
-    throw new Error(`Discord webhook failed: ${response.status} ${body}`);
-  }
+  console.log("Sent Discord alert");
 }
 
 async function run() {
   console.log("Bot started...");
-  console.log(`Target URL: ${URL}`);
-  console.log(`Check interval: ${INTERVAL}ms`);
+  console.log(`Target: ${URL}`);
+  console.log(`Interval: ${INTERVAL}ms`);
 
   while (true) {
     try {
-      console.log(`[${new Date().toISOString()}] Checking page...`);
+      console.log("Checking page...");
 
       const html = await fetchPage();
       const products = extractProducts(html);
 
       if (lastSeen.size === 0) {
-        console.log(
-          `[${new Date().toISOString()}] First run detected. Saving ${products.size} items without alerting.`
-        );
+        console.log("First run — saving baseline");
         lastSeen = products;
       } else {
-        let newCount = 0;
+        let newItems = 0;
 
         for (const link of products) {
           if (!lastSeen.has(link)) {
-            newCount += 1;
-            console.log(`[${new Date().toISOString()}] NEW ITEM DETECTED: ${link}`);
-            await sendDiscord(`🟢 New TCG item detected:\n${link}`);
+            newItems++;
+            console.log("NEW ITEM:", link);
+
+            await sendDiscord(`🟢 NEW TCG ITEM:\n${link}`);
           }
         }
 
-        console.log(
-          `[${new Date().toISOString()}] Check complete. New items found: ${newCount}`
-        );
-
+        console.log(`New items found: ${newItems}`);
         lastSeen = products;
       }
     } catch (err) {
-      console.error(`[${new Date().toISOString()}] Error: ${err.message}`);
+      console.error("ERROR:", err.message);
     }
 
-    console.log(
-      `[${new Date().toISOString()}] Sleeping for ${INTERVAL}ms...`
-    );
     await sleep(INTERVAL);
   }
 }
