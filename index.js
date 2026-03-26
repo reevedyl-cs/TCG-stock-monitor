@@ -16,54 +16,53 @@ function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+// ✅ PROXY FETCH (fixes 403)
 async function fetchPage() {
-  console.log(`[${new Date().toISOString()}] Fetching page...`);
+  const proxyUrl = `https://r.jina.ai/${URL}`;
 
-  const res = await fetch(URL, {
-    headers: {
-      "User-Agent":
-        "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15",
-      "Accept":
-        "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-      "Accept-Language": "en-US,en;q=0.9",
-    },
-  });
+  console.log(`[${new Date().toISOString()}] Fetching via proxy...`);
 
-  console.log(`Status: ${res.status}`);
+  const res = await fetch(proxyUrl);
+
+  console.log(`[${new Date().toISOString()}] Status: ${res.status}`);
 
   const html = await res.text();
-  console.log(`HTML length: ${html.length}`);
+
+  console.log(`[${new Date().toISOString()}] HTML length: ${html.length}`);
 
   return html;
 }
 
-// 🔥 FIXED extractor (works with Pokémon site)
+// ✅ Extract product names (works with proxy output)
 function extractProducts(html) {
-  const matches = [...html.matchAll(/"url":"(\/product\/[^"]+)"/g)];
+  const products = new Set();
 
-  const products = new Set(
-    matches.map((m) =>
-      "https://www.pokemoncenter.com" + m[1].replace(/\\\//g, "/")
-    )
+  const matches = [...html.matchAll(/https:\/\/www\.pokemoncenter\.com\/product\/[^\s"]+/g)];
+
+  for (const match of matches) {
+    products.add(match[0]);
+  }
+
+  console.log(
+    `[${new Date().toISOString()}] Extracted ${products.size} products`
   );
-
-  console.log(`Extracted ${products.size} product links`);
 
   return products;
 }
 
+// ✅ Discord alert
 async function sendDiscord(message) {
-  await fetch(WEBHOOK, {
+  const res = await fetch(WEBHOOK, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({
-      content: message,
-    }),
+    body: JSON.stringify({ content: message }),
   });
 
-  console.log("Sent Discord alert");
+  console.log(
+    `[${new Date().toISOString()}] Discord status: ${res.status}`
+  );
 }
 
 async function run() {
@@ -73,7 +72,7 @@ async function run() {
 
   while (true) {
     try {
-      console.log("Checking page...");
+      console.log(`[${new Date().toISOString()}] Checking page...`);
 
       const html = await fetchPage();
       const products = extractProducts(html);
@@ -82,24 +81,28 @@ async function run() {
         console.log("First run — saving baseline");
         lastSeen = products;
       } else {
-        let newItems = 0;
+        let newCount = 0;
 
-        for (const link of products) {
-          if (!lastSeen.has(link)) {
-            newItems++;
-            console.log("NEW ITEM:", link);
+        for (const item of products) {
+          if (!lastSeen.has(item)) {
+            newCount++;
+            console.log("NEW ITEM:", item);
 
-            await sendDiscord(`🟢 NEW TCG ITEM:\n${link}`);
+            await sendDiscord(`🟢 NEW TCG ITEM:\n${item}`);
           }
         }
 
-        console.log(`New items found: ${newItems}`);
+        console.log(
+          `[${new Date().toISOString()}] New items found: ${newCount}`
+        );
+
         lastSeen = products;
       }
     } catch (err) {
       console.error("ERROR:", err.message);
     }
 
+    console.log(`Sleeping ${INTERVAL}ms...\n`);
     await sleep(INTERVAL);
   }
 }
